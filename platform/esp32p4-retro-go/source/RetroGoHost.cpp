@@ -52,10 +52,10 @@ static Audio *_audio = NULL;
 static rg_audio_frame_t *_audioBuffer = NULL;
 static size_t _audioFrames = 0;
 
-// Temporary instrumentation: GameLoop is one iteration per frame (wait, Step, drawFrame, fill
-// audio), and on the first hardware run a frame took far longer than its budget without saying
-// where. Reports the split once a second. Delete once the answer is in docs/BRINGUP.md.
-#define FAKE08_TIMING 1
+// Set to 1 to log where a frame goes: Lua, audio synthesis, display submit, audio submit.
+// Left in because that split is what found the bring-up bug written up in docs/BRINGUP.md, and
+// it will be wanted again the first time a real cart runs slowly.
+#define FAKE08_TIMING 0
 static int64_t _tDraw, _tAudio, _tWork, _tSynth, _tFillStart;
 static int _tFrames;
 
