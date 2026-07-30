@@ -379,9 +379,9 @@ int16_t Audio::getMusicTickCount(){
 
 void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth, 
                               float freq_factor, float length, bool is_music, 
-                              bool can_loop, bool half_rate, double inv_frames_per_second)
+                              bool can_loop, bool half_rate, float inv_frames_per_second)
 {
-    using std::fabs, std::fmod, std::floor, std::max;
+    using std::fabsf, std::fmodf, std::floorf, std::max;
 
     if (cur_sfx.sfx == -1) return;
 
@@ -392,22 +392,22 @@ void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth,
     // Speed must be 1—255 otherwise the SFX is invalid
     int const speed = max(1, (int)sfx_data.speed);
 
-    double const offset = cur_sfx.offset;
-    double const time = cur_sfx.time;
+    float const offset = cur_sfx.offset;
+    float const time = cur_sfx.time;
 
     // PICO-8 exports instruments as 22050 Hz WAV files with 183 samples
     // per speed unit per note, so this is how much we should advance
-    double const offset_per_second = 22050.0 / (183.0 * speed);
-    double const offset_per_frame = offset_per_second * inv_frames_per_second;
-    double next_offset = offset + offset_per_frame;
-    double next_time = time + offset_per_frame;
+    float const offset_per_second = 22050.f / (183.f * speed);
+    float const offset_per_frame = offset_per_second * inv_frames_per_second;
+    float next_offset = offset + offset_per_frame;
+    float next_time = time + offset_per_frame;
 
     // Handle SFX loops. From the documentation: "Looping is turned
     // off when the start index >= end index".
     float const loop_range = float(sfx_data.loopRangeEnd - sfx_data.loopRangeStart);
     if (loop_range > 0.f && next_offset >= sfx_data.loopRangeEnd && can_loop)
     {
-        next_offset = fmod(next_offset - sfx_data.loopRangeStart, loop_range)
+        next_offset = fmodf(next_offset - sfx_data.loopRangeStart, loop_range)
             + sfx_data.loopRangeStart;
     }
 
@@ -446,8 +446,8 @@ void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth,
 
     if (offset < 32)
     {
-        int const note_id = (int)floor(offset);
-        int const next_note_id = (int)floor(next_offset);
+        int const note_id = (int)floorf(offset);
+        int const next_note_id = (int)floorf(next_offset);
 
         uint8_t key = sfx_data.notes[note_id].getKey();
         float volume = sfx_data.notes[note_id].getVolume() / 7.f;
@@ -464,7 +464,7 @@ void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth,
                 break;
             case FX_SLIDE:
             {
-                float t = (float)fmod(offset, 1.0);
+                float t = fmodf(offset, 1.f);
                 // From the documentation: "Slide to the next note and volume",
                 // but it's actually _from_ the _prev_ note and volume.
                 freq = lerp(key_to_freq((float)cur_sfx.prev_key), freq, t);
@@ -477,18 +477,18 @@ void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth,
                 // Triangle wave modulation at 7.5 Hz, depth = half a semitone.
                 // The original code had fabs() wrapping only fmod(), producing
                 // a sawtooth modulation. Correct form: fabs(fmod(...) - 0.5).
-                float t = (float)(fabs(fmod(7.5 * offset / offset_per_second, 1.0) - 0.5) - 0.25);
+                float t = fabsf(fmodf(7.5f * offset / offset_per_second, 1.f) - 0.5f) - 0.25f;
                 freq = lerp(freq, freq * 1.059463094359f, t);
                 break;
             }
             case FX_DROP:
-                freq *= 1.f - (float)fmod(offset, 1.0);
+                freq *= 1.f - fmodf(offset, 1.f);
                 break;
             case FX_FADE_IN:
-                volume *= (float)fmod(offset, 1.0);
+                volume *= fmodf(offset, 1.f);
                 break;
             case FX_FADE_OUT:
-                volume *= 1.f - (float)fmod(offset, 1.0);
+                volume *= 1.f - fmodf(offset, 1.f);
                 break;
             case FX_ARP_FAST:
             case FX_ARP_SLOW:
@@ -498,7 +498,7 @@ void Audio::update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth,
                 //  7 arpeggio slow  //  Iterate over groups of 4 notes at speed of 8"
                 // "If the SFX speed is <= 8, arpeggio speeds are halved to 2, 4"
                 int const m = (speed <= 8 ? 32 : 16) / (fx == FX_ARP_FAST ? 4 : 8);
-                int const n = (int)(m * 7.5 * offset / offset_per_second);
+                int const n = (int)(m * 7.5f * offset / offset_per_second);
                 int const arp_note = (note_id & ~3) | (n & 3);
                 freq = key_to_freq(sfx_data.notes[arp_note].getKey());
                 break;
@@ -597,17 +597,17 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
         bool is_pause = _memory->drawState.soundPauseState == 1;
 
         for (int chan = 0; chan < 4; ++chan) {
-            double inv_frames_per_second = ((_memory->hwState.half_rate & (1 << chan)) ? 0.5 : 1.0) / 22050.0;
+            float inv_frames_per_second = ((_memory->hwState.half_rate & (1 << chan)) ? 0.5f : 1.f) / 22050.f;
 
             sfxChannel& channel_state = _audioState._sfxChannels[chan];
 
             // Advance music using the first channel
             if (chan == 0 && _audioState._musicChannel.pattern != -1 && !is_pause)
             {
-                double const offset_per_second = 22050.0 / 183.0;
-                double const offset_per_frame = offset_per_second * inv_frames_per_second;
+                float const offset_per_second = 22050.f / 183.f;
+                float const offset_per_frame = offset_per_second * inv_frames_per_second;
                 _audioState._musicChannel.offset += offset_per_frame;
-                _audioState._musicChannel.fade_volume += (float)(_audioState._musicChannel.fade_volume_step * inv_frames_per_second);
+                _audioState._musicChannel.fade_volume += _audioState._musicChannel.fade_volume_step * inv_frames_per_second;
                 _audioState._musicChannel.fade_volume = clamp(_audioState._musicChannel.fade_volume, 0.f, 1.f);
 
                 if (_audioState._musicChannel.fade_volume_step < 0 && _audioState._musicChannel.fade_volume <= 0)
@@ -642,17 +642,17 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                 // compute offset to start the sfx to
                 bool want_play = true;
                 int const speed = std::max(1, (int)sfx_data.speed);
-                double new_offset = _audioState._musicChannel.offset / speed;
+                float new_offset = _audioState._musicChannel.offset / speed;
 
                 float const loop_range = (float)(sfx_data.loopRangeEnd - sfx_data.loopRangeStart);
                 if (loop_range > 0.f && channel_state.can_loop)
                 {
                     if (new_offset > sfx_data.loopRangeStart)
-                        new_offset = std::fmod(new_offset - sfx_data.loopRangeStart, loop_range) + sfx_data.loopRangeStart;
+                        new_offset = std::fmodf(new_offset - sfx_data.loopRangeStart, loop_range) + sfx_data.loopRangeStart;
                 }
                 else
                 {
-                    if (new_offset > 32.0)
+                    if (new_offset > 32.f)
                         want_play = false;
                 }
 
@@ -672,7 +672,7 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
 
             if (!is_pause)
             {
-                double main_sfx_base_offset = channel_state.main_sfx.offset;
+                float main_sfx_base_offset = channel_state.main_sfx.offset;
                 bool half_rate = _memory->hwState.half_rate & (1 << (chan + 4));
                 // update main sfx
                 update_sfx_state(channel_state.main_sfx, new_synth, 1.0f, channel_state.length, 
@@ -691,14 +691,14 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                         if (channel_state.main_sfx.offset < main_sfx_base_offset) restart_custom = true;
                         // also need to restart if custom_sfx.sfx == -1 (it has ended) and main_sfx.offset is changing integer
                         if (channel_state.custom_sfx.sfx == -1 && 
-                            std::floor(main_sfx_base_offset) != std::floor(channel_state.main_sfx.offset)) 
+                            std::floorf(main_sfx_base_offset) != std::floorf(channel_state.main_sfx.offset)) 
                             restart_custom = true;
 
                         if (restart_custom)
                         {
                             channel_state.custom_sfx.sfx = new_synth.instrument;
-                            channel_state.custom_sfx.offset = 0.0;
-                            channel_state.custom_sfx.time = 0.0;
+                            channel_state.custom_sfx.offset = 0.f;
+                            channel_state.custom_sfx.time = 0.f;
                         }
                         new_synth.phi = last_synth.phi;
                         float const freq_base = key_to_freq(24); // C2
@@ -723,7 +723,7 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                 }
                 channel_state.fade = 1.0f;
                 // reset phi between notes so we don't get very big values that would lose precision
-                new_synth.phi = std::fmod(new_synth.phi, 1.0f);
+                new_synth.phi = std::fmodf(new_synth.phi, 1.0f);
             }
             last_synth = new_synth;
 
@@ -750,7 +750,7 @@ void Audio::FillAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                 chan_damp1_value = lerp(chan_damp1_value, fade_dampen == 1 ? 1.0f : 0.0f, channel_state.fade);
                 chan_damp2_value = lerp(chan_damp2_value, fade_dampen == 2 ? 1.0f : 0.0f, channel_state.fade);
 
-                channel_state.fade -= (float)(130.0 * inv_frames_per_second);
+                channel_state.fade -= 130.f * inv_frames_per_second;
             }
 
             // hw can force fx passes
@@ -817,17 +817,17 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
         bool is_pause = _memory->drawState.soundPauseState == 1;
 
         for (int chan = 0; chan < 4; ++chan) {
-            double inv_frames_per_second = ((_memory->hwState.half_rate & (1 << chan)) ? 0.5 : 1.0) / 22050.0;
+            float inv_frames_per_second = ((_memory->hwState.half_rate & (1 << chan)) ? 0.5f : 1.f) / 22050.f;
 
             sfxChannel& channel_state = _audioState._sfxChannels[chan];
 
             // Advance music using the first channel
             if (chan == 0 && _audioState._musicChannel.pattern != -1 && !is_pause)
             {
-                double const offset_per_second = 22050.0 / 183.0;
-                double const offset_per_frame = offset_per_second * inv_frames_per_second;
+                float const offset_per_second = 22050.f / 183.f;
+                float const offset_per_frame = offset_per_second * inv_frames_per_second;
                 _audioState._musicChannel.offset += offset_per_frame;
-                _audioState._musicChannel.fade_volume += (float)(_audioState._musicChannel.fade_volume_step * inv_frames_per_second);
+                _audioState._musicChannel.fade_volume += _audioState._musicChannel.fade_volume_step * inv_frames_per_second;
                 _audioState._musicChannel.fade_volume = clamp(_audioState._musicChannel.fade_volume, 0.f, 1.f);
 
                 if (_audioState._musicChannel.fade_volume_step < 0 && _audioState._musicChannel.fade_volume <= 0)
@@ -861,17 +861,17 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
 
                 bool want_play = true;
                 int const speed = std::max(1, (int)sfx_data.speed);
-                double new_offset = _audioState._musicChannel.offset / speed;
+                float new_offset = _audioState._musicChannel.offset / speed;
 
                 float const loop_range = (float)(sfx_data.loopRangeEnd - sfx_data.loopRangeStart);
                 if (loop_range > 0.f && channel_state.can_loop)
                 {
                     if (new_offset > sfx_data.loopRangeStart)
-                        new_offset = std::fmod(new_offset - sfx_data.loopRangeStart, loop_range) + sfx_data.loopRangeStart;
+                        new_offset = std::fmodf(new_offset - sfx_data.loopRangeStart, loop_range) + sfx_data.loopRangeStart;
                 }
                 else
                 {
-                    if (new_offset > 32.0)
+                    if (new_offset > 32.f)
                         want_play = false;
                 }
 
@@ -891,7 +891,7 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
 
             if (!is_pause)
             {
-                double main_sfx_base_offset = channel_state.main_sfx.offset;
+                float main_sfx_base_offset = channel_state.main_sfx.offset;
                 bool half_rate = _memory->hwState.half_rate & (1 << (chan + 4));
                 update_sfx_state(channel_state.main_sfx, new_synth, 1.0f, channel_state.length, 
                                 channel_state.is_music, channel_state.can_loop, half_rate, inv_frames_per_second);
@@ -907,14 +907,14 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                     {
                         if (channel_state.main_sfx.offset < main_sfx_base_offset) restart_custom = true;
                         if (channel_state.custom_sfx.sfx == -1 && 
-                            std::floor(main_sfx_base_offset) != std::floor(channel_state.main_sfx.offset)) 
+                            std::floorf(main_sfx_base_offset) != std::floorf(channel_state.main_sfx.offset)) 
                             restart_custom = true;
 
                         if (restart_custom)
                         {
                             channel_state.custom_sfx.sfx = new_synth.instrument;
-                            channel_state.custom_sfx.offset = 0.0;
-                            channel_state.custom_sfx.time = 0.0;
+                            channel_state.custom_sfx.offset = 0.f;
+                            channel_state.custom_sfx.time = 0.f;
                         }
                         new_synth.phi = last_synth.phi;
                         float const freq_base = key_to_freq(24);
@@ -937,7 +937,7 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                     channel_state.fade_synth = last_synth;
                 }
                 channel_state.fade = 1.0f;
-                new_synth.phi = std::fmod(new_synth.phi, 1.0f);
+                new_synth.phi = std::fmodf(new_synth.phi, 1.0f);
             }
             last_synth = new_synth;
 
@@ -963,7 +963,7 @@ void Audio::FillMonoAudioBuffer(void *audioBuffer, size_t offset, size_t size){
                 chan_damp1_value = lerp(chan_damp1_value, fade_dampen == 1 ? 1.0f : 0.0f, channel_state.fade);
                 chan_damp2_value = lerp(chan_damp2_value, fade_dampen == 2 ? 1.0f : 0.0f, channel_state.fade);
 
-                channel_state.fade -= (float)(130.0 * inv_frames_per_second);
+                channel_state.fade -= 130.f * inv_frames_per_second;
             }
 
             if (_memory->hwState.reverb & (1 << (chan + 4))) chan_reverb1_value = 1.0f;

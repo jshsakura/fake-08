@@ -134,15 +134,15 @@ struct musicChannel {
     float volume_sfx = 0.5f;
     float fade_volume = 0.f;
     float fade_volume_step = 0.f;
-    double offset = -1;
+    float offset = -1;
     float length = 0;
 };
 
 // SFX playback state
 struct sfx_state {
     int16_t sfx = -1;
-    double offset = 0;
-    double time = 0;
+    float offset = 0;
+    float time = 0;
     int8_t prev_key = 0;
     float prev_vol = 0;
 };

@@ -95,7 +95,7 @@ class Audio {
     void set_music_pattern(int pattern);
     void update_sfx_state(sfx_state& cur_sfx, z8::synth_param& new_synth, 
                           float freq_factor, float length, bool is_music, 
-                          bool can_loop, bool half_rate, double inv_frames_per_second);
+                          bool can_loop, bool half_rate, float inv_frames_per_second);
     float get_synth_sample(z8::synth_param& params);
     void launch_sfx(int16_t sfx, int16_t chan, float offset, float length, bool is_music);
     

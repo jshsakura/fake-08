@@ -52,6 +52,13 @@ static Audio *_audio = NULL;
 static rg_audio_frame_t *_audioBuffer = NULL;
 static size_t _audioFrames = 0;
 
+// Temporary instrumentation: GameLoop is one iteration per frame (wait, Step, drawFrame, fill
+// audio), and on the first hardware run a frame took far longer than its budget without saying
+// where. Reports the split once a second. Delete once the answer is in docs/BRINGUP.md.
+#define FAKE08_TIMING 1
+static int64_t _tDraw, _tAudio, _tWork, _tSynth, _tFillStart;
+static int _tFrames;
+
 static int _targetFps = 60;
 static int64_t _frameDeadline = 0;
 static int64_t _frameStarted = 0;
@@ -206,6 +213,19 @@ void Host::waitForTargetFps()
     else
         rg_usleep(_frameDeadline - now);
 
+#if FAKE08_TIMING
+    // Everything between two frames' ends, minus the two pieces measured above, is Step() --
+    // the cart's own _update and _draw plus the audio synthesis.
+    _tWork += now - _frameStarted;
+    if (++_tFrames >= 10)
+    {
+        RG_LOGI("10 frames: work %dms = lua %dms + synth %dms + submit %dms + audio %dms", (int)(_tWork / 1000),
+                (int)((_tWork - _tDraw - _tAudio - _tSynth) / 1000), (int)(_tSynth / 1000), (int)(_tDraw / 1000),
+                (int)(_tAudio / 1000));
+        _tWork = _tDraw = _tAudio = _tSynth = 0;
+        _tFrames = 0;
+    }
+#endif
     _frameStarted = rg_system_timer();
 }
 
@@ -234,11 +254,22 @@ void Host::drawFrame(uint8_t *picoFb, uint8_t *screenPaletteMap, uint8_t drawMod
         }
     }
 
+#if FAKE08_TIMING
+    int64_t started = rg_system_timer();
+#endif
     rg_display_submit(_surface, 0);
+#if FAKE08_TIMING
+    _tDraw += rg_system_timer() - started;
+#endif
 }
 
 bool Host::shouldFillAudioBuff()
 {
+#if FAKE08_TIMING
+    // GameLoop calls this, then FillAudioBuffer, then playFilledAudioBuffer. So the gap
+    // between here and there is the synthesis itself -- the part written with doubles.
+    _tFillStart = rg_system_timer();
+#endif
     return _audioBuffer != NULL;
 }
 
@@ -256,7 +287,14 @@ size_t Host::getAudioBufferSize()
 
 void Host::playFilledAudioBuffer()
 {
+#if FAKE08_TIMING
+    int64_t started = rg_system_timer();
+    _tSynth += started - _tFillStart;
+#endif
     rg_audio_submit(_audioBuffer, _audioFrames);
+#if FAKE08_TIMING
+    _tAudio += rg_system_timer() - started;
+#endif
 }
 
 bool Host::shouldRunMainLoop()
